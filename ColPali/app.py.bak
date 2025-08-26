@@ -1,0 +1,138 @@
+import base64
+import os, io
+from pathlib import Path
+from flask import Flask, jsonify, request, render_template
+import torch
+from pdf2image import convert_from_path, convert_from_bytes
+from PIL import Image
+from transformers.utils.import_utils import is_flash_attn_2_available
+from colpali_engine.models import ColQwen2, ColQwen2Processor
+
+# from torch.utils.data import DataLoader
+# from tqdm import tqdm
+# from transformers import AutoProcessor
+
+app = Flask(__name__)
+
+# Global variables to store the loaded model and processor
+processor = None
+model = None
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+# model_dir = Path("D:\\models\\modelscope\\hub\\models")\
+model_dir = ""
+model_name = "vidore/colqwen2-v1.0"
+models_loaded = False  # Flag to track if models are loaded
+
+
+def load_models():
+    """
+    Loads the ColPali model and processor into memory on application startup
+    using ModelScope for faster downloads in China.
+    """
+    global processor, model, models_loaded
+
+    if models_loaded:  # Skip if already loaded
+        return
+
+    model_path = model_name
+    print(torch.__version__)
+    print(torch.version.cuda)
+    print(torch.cuda.is_available())  # Should return True
+    print(torch.cuda.get_device_name(0))  # Should display your GPU name.
+    print(f"Loading ColPali model on device: {device}")
+    print(f"Loading ColPali model on path: {model_path}")
+
+    try:
+        # Load model using ModelScope
+        model = ColQwen2.from_pretrained(
+            model_path,
+            torch_dtype=torch.bfloat16,
+            device_map=device,
+            attn_implementation=(
+                "flash_attention_2" if is_flash_attn_2_available() else None
+            ),
+        )
+
+        # For processor, you might need to check if ModelScope has a compatible version
+        # If not, you can still use the original processor but ensure model files are downloaded
+        processor = ColQwen2Processor.from_pretrained(model_path)
+        models_loaded = True  # Set flag to True after loading
+        print(f"ColPali model loaded successfully with Device: {device}!")
+    except Exception as e:
+        print(f"Error loading model: {str(e)}")
+
+
+@app.route("/process_text", methods=["POST"])
+def process_text():
+    """
+    API endpoint to process text queries and return embeddings.
+    Accepts a JSON payload with a 'texts' key.
+    """
+    data = request.get_json()
+    texts = data.get("texts", [])
+    if not texts:
+        return jsonify({"error": "No 'texts' provided in the request."}), 400
+
+    try:
+        inputs = processor.process_queries(texts, return_tensors="pt").to(device)
+        with torch.no_grad():
+            text_embeddings = model.encode_queries(**inputs)
+
+        # Convert embeddings to a list of lists for JSON serialization
+        embeddings_list = text_embeddings.cpu().tolist()
+        return jsonify({"embeddings": embeddings_list})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/process_images", methods=["POST"])
+def process_images():
+    """
+    API endpoint to process images provided as base64 strings.
+    Accepts a JSON payload with an 'images' key.
+    """
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "No file uploaded."}), 400
+
+    try:
+        if not file.filename.lower().endswith(".pdf"):
+            return jsonify({"error": "Uploaded file is not a PDF."}), 400
+
+        # Convert the PDF to images
+        base64_images = convert_from_bytes(file.read(), dpi=300)
+
+        if not base64_images:
+            return jsonify({"error": "No 'images' provided in the request."}), 400
+
+        images = []
+        for b64_img in base64_images:
+            img_data = base64.b64decode(b64_img)
+            images.append(Image.open(io.BytesIO(img_data)))
+
+        inputs = processor.process_images(images, return_tensors="pt").to(device)
+        with torch.no_grad():
+            image_embeddings = model.encode_images(**inputs)
+
+        # ColPali provides multi-vector embeddings; we return them as a list of lists.
+        embeddings_list = image_embeddings.cpu().tolist()
+        return jsonify({"embeddings": embeddings_list})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    return render_template("index.html")
+
+
+@app.before_request
+def before_request():
+    """Ensure models are loaded before the first request."""
+    if not models_loaded:
+        load_models()
+
+
+if __name__ == "__main__":
+    load_models()  # Load models when starting the app directly
+    app.run(host="0.0.0.0", port=5000, debug=True)

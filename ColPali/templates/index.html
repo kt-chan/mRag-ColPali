@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Text Processing</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .upload-container { margin: 20px 0; }
+        button { margin: 10px 0; padding: 10px 20px; }
+        .response { margin-top: 20px; padding: 15px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <h1>Text Processing</h1>
+    <div class="upload-container">
+        <input type="file" id="fileInput" accept="application/pdf">
+        <button onclick="processFile()">Process File</button>
+    </div>
+    <div id="response" class="response"></div>
+
+    <script>
+        function processFile() {
+            const fileInput = document.getElementById("fileInput");
+            const file = fileInput.files[0];
+            const responseDiv = document.getElementById("response");
+
+            responseDiv.innerHTML = "";
+            
+            if (!file) {
+                responseDiv.innerHTML = "<p style='color: red;'>Please select a file to process.</p>";
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", file);
+
+            fetch("http://localhost:5000/process_images", {
+                method: "POST",
+                body: formData,
+            })
+            .then((response) => response.json())
+            .then((data) => {
+                if (data.error) {
+                    responseDiv.innerHTML = `<p style='color: red;'>Error: ${data.error}</p>`;
+                } else {
+                    responseDiv.innerHTML = `<p style='color: green;'>Processing Successful!</p>
+                    <p>Embeddings: ${JSON.stringify(data.embeddings, null, 2)}</p>`;
+                }
+            })
+            .catch((error) => {
+                responseDiv.innerHTML = `<p style='color: red;'>Error: ${error.message}</p>`;
+            });
+        }
+    </script>
+</body>
+</html>
