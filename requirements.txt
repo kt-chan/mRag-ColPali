@@ -1,11 +1,9 @@
---extra-index-url https://download.pytorch.org/whl/cu128
 Flask==3.0.0
 Flask-Cors==4.0.0
 colpali-engine==0.3.12
 transformers>=4.46.1
-torch==2.7.0+cu128
-torchvision==0.22.0+cu128
-torchaudio==2.7.0+cu128
+opencv-python
+dotenv
 PyPDF2
 pdf2image
 setuptools 
@@ -24,3 +22,9 @@ einops
 google-generativeai
 hf_xet
 gradio
+Streamlit
+
+# --extra-index-url https://download.pytorch.org/whl/cu128
+# torch==2.7.0+cu128
+# torchvision==0.22.0+cu128
+# torchaudio==2.7.0+cu128

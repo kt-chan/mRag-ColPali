@@ -2,16 +2,32 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run Gradio App with Hot Reload",
+            "name": "Debug Gradio",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/ColPali/start_gradio.py",
+            "program": "C:/Users/c00627809/AppData/Roaming/Python/Python312/Scripts/gradio.exe",
             "args": [
-                "--demo-name",
-                "demo"
+                "ColPali/app.py"
             ],
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": true
         }
     ]
 }
+// {
+//     "version": "0.2.0",
+//     "configurations": [
+//         {
+//             "name": "Run Gradio App with Hot Reload",
+//             "type": "debugpy",
+//             "request": "launch",
+//             "program": "${workspaceFolder}/ColPali/start_gradio.py",
+//             "args": [
+//                 "--demo-name",
+//                 "demo"
+//             ],
+//             "console": "integratedTerminal",
+//             "justMyCode": false
+//         }
+//     ]
+// }
