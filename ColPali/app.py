@@ -1,12 +1,8 @@
-import base64
-import io
-import json
-import os
-import cv2
-import torch
+import io, os, torch, base64, json, cv2
+import gradio as gr
+import threading
 from dotenv import load_dotenv
 from pathlib import Path
-import gradio as gr
 from pdf2image import convert_from_path
 from PIL import Image
 from torch.utils.data import DataLoader
@@ -14,13 +10,15 @@ from tqdm import tqdm
 from transformers.utils.import_utils import is_flash_attn_2_available
 from colpali_engine.models import ColQwen2, ColQwen2Processor
 from models.chatglm import ChatGLM
-import threading
 
+# Global Variable
 COLORS = ["#4285f4", "#db4437", "#f4b400", "#0f9d58", "#e48ef1"]
-mock_image = Image.new("RGB", (448, 448), (255, 255, 255))
+MOCK_IMAGE = Image.new("RGB", (448, 448), (255, 255, 255))
+DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
+MODEL_NAME = "vidore/colqwen2-v1.0"
 
 # CSS for emojis
-css = """
+CSS_CONFIG = """
 .emoji {
     width: 20px !important;
     height: 20px !important;
@@ -29,6 +27,30 @@ css = """
     margin: 0 4px !important;
 }
 """
+
+
+# Initialize model and processor once using gr.NO_RELOAD
+if gr.NO_RELOAD:
+    print(f"Loading ColPali model on device: {DEVICE}")
+    print(f"Loading ColPali model on path: {MODEL_NAME}")
+    try:
+        MODEL = ColQwen2.from_pretrained(
+            MODEL_NAME,
+            torch_dtype=torch.bfloat16,
+            device_map=DEVICE,
+            attn_implementation=(
+                "flash_attention_2" if is_flash_attn_2_available() else None
+            ),
+        ).eval()
+
+        PROCESSOR = ColQwen2Processor.from_pretrained(MODEL_NAME)
+        MODEL_LOADED = True
+        print(f"ColPali model loaded successfully with Device: {DEVICE}!")
+    except Exception as e:
+        print(f"Error loading model: {str(e)}")
+        MODEL = None
+        PROCESSOR = None
+        MODEL_LOADED = False
 
 
 class ColPaliApp:
@@ -40,17 +62,16 @@ class ColPaliApp:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super(ColPaliApp, cls).__new__(cls)
-                    cls.processor = None
-                    cls.model = None
-                    cls.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-                    cls.models_loaded = False
+                    cls.model = MODEL
+                    cls.processor = PROCESSOR
+                    cls.device = DEVICE
+                    cls.models_loaded = MODEL_LOADED
                     cls.model_name = "vidore/colqwen2-v1.0"
                     cls.hf_home = os.getenv(
                         "HF_HOME", "C:/Program Files/poppler/Library/bin"
                     )
                     cls.popper_path = os.getenv("POPPER_PATH", "D:/models/huggingface")
                     cls.vlm_api_key = os.getenv("VLM_API_KEY", None)
-                    cls.reload()
         return cls._instance
 
     @classmethod
@@ -59,39 +80,34 @@ class ColPaliApp:
 
     @classmethod
     def reload(cls):
+        # No-op since models are loaded in gr.NO_RELOAD block
+        global MODEL_LOADED, MODEL, PROCESSOR, DEVICE
+        if MODEL_LOADED == False or MODEL is None or PROCESSOR is None:
+            print(f"Loading ColPali model on device: {DEVICE}")
+            print(f"Loading ColPali model on path: {MODEL_NAME}")
 
-        if cls.processor is not None and cls.model is not None:
-            return
+            try:
+                MODEL = ColQwen2.from_pretrained(
+                    MODEL_NAME,
+                    torch_dtype=torch.bfloat16,
+                    device_map=DEVICE,
+                    attn_implementation=(
+                        "flash_attention_2" if is_flash_attn_2_available() else None
+                    ),
+                ).eval()
 
-        model_path = cls.model_name
-        print(f"torch.version: {torch.__version__}")
-        print(f"torch.version.cuda: {torch.version.cuda}")
-        print(f"cuda availability: {torch.cuda.is_available()}")
-        print(f"cuda device Name: {torch.cuda.get_device_name()}")
-        print(f"Loading ColPali model on device: {cls.device}")
-        print(f"Loading ColPali model on path: {model_path}")
-
-        try:
-            cls.model = ColQwen2.from_pretrained(
-                model_path,
-                torch_dtype=torch.bfloat16,
-                device_map=cls.device,
-                attn_implementation=(
-                    "flash_attention_2" if is_flash_attn_2_available() else None
-                ),
-            ).eval()
-
-            if cls.model is None:
-                raise ValueError(f"model: {model_path} failed to load")
-
-            cls.processor = ColQwen2Processor.from_pretrained(model_path)
-            if cls.processor is None:
-                raise ValueError(f"Processor: {model_path} failed to load")
-
-            cls.models_loaded = True
-            print(f"ColPali model loaded successfully with Device: {cls.device}!")
-        except Exception as e:
-            print(f"Error loading model: {str(e)}")
+                PROCESSOR = ColQwen2Processor.from_pretrained(MODEL_NAME)
+                MODEL_LOADED = True
+                cls.models_loaded = MODEL_LOADED
+                cls.model = MODEL
+                cls.processor = PROCESSOR
+                cls.device = DEVICE
+                print(f"ColPali model loaded successfully with Device: {DEVICE}!")
+            except Exception as e:
+                print(f"Error loading model: {str(e)}")
+                MODEL = None
+                PROCESSOR = None
+                MODEL_LOADED = False
 
     @classmethod
     def encode_image(cls, image: Image):
@@ -100,6 +116,10 @@ class ColPaliApp:
             return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
     def index(self, file, ds):
+        if not self.models_loaded or self.model is None or self.processor is None:
+            print(f"Model not loaded properly, reloading ...")
+            self.reload()
+
         images = []
         for f in file:
             images.extend(convert_from_path(f, poppler_path=self.popper_path))
@@ -119,6 +139,9 @@ class ColPaliApp:
         return f"Uploaded and converted {len(images)} pages", ds, images
 
     def search(self, query: str, ds, images):
+        if not self.models_loaded:
+            return "Model not loaded properly", MOCK_IMAGE
+
         qs = []
         with torch.no_grad():
             batch_query = self.processor.process_queries([query])
@@ -128,15 +151,13 @@ class ColPaliApp:
 
         scores = self.processor.score_multi_vector(qs, ds)
         best_page = int(scores.argmax(axis=1).item())
-        return f"The most relevant page is {best_page}", images[best_page]
+        return f"The most relevant page is {str(best_page)}", images[best_page]
 
     def get_answer(self, prompt: str, image: Image):
+        if not self.vlm_api_key:
+            return "VLM API key not configured"
 
-        # Initialize client
         vlmClient = ChatGLM(self.vlm_api_key)
-
-        # Example request
-        # Analysis of main volatile components in the Yinqiaosan decoction samples with different time by gas chromatography‑mass spectrometer
         try:
             base64_image = self.encode_image(image)
             print("Image decoded, and waiting API Response:")
@@ -144,53 +165,87 @@ class ColPaliApp:
                 image_url=f"data:image/jpeg;base64,{base64_image}",
                 text_prompt=f"{prompt}",
             )
-            print("Waiting API Response:")
+            print("Received API Response:")
             return response
         except Exception as e:
             print(f"VLM Calling Error: {str(e)}")
+            return f"Error: {str(e)}"
 
     def search_with_llm(self, query, ds, images):
+        if not self.models_loaded:
+            return "Model not loaded properly", MOCK_IMAGE, "Model not loaded properly"
+
         search_message, best_image = self.search(query, ds, images)
         answer = self.get_answer(
-            "What is shown in this image, analyze and provide some interpretation?",
+            f"What is shown in this image, analyze and provide some interpretation? And provide a concise answer to this question: {query}",
             best_image,
         )
         return search_message, best_image, answer
 
 
 # Gradio Interface
-with gr.Blocks(css=css) as demo:
-    gr.Markdown("# ColPali: Efficient Document Retrieval")
+with gr.Blocks(css=CSS_CONFIG) as demo:
+    gr.Markdown("# AnyVision: Efficient Visual Retrieval for Anything")
+
+    # Upload Section
     gr.Markdown(
         '## <img draggable="false" role="img" class="emoji" alt="1️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/31-20e3.svg  "> Upload PDFs'
     )
-    file = gr.File(file_types=[".pdf"], file_count="multiple", type="filepath")
+    file = gr.File(
+        file_types=[".pdf"],
+        file_count="multiple",
+        type="filepath",
+        elem_id="pdf_upload",  # Unique ID
+        label="Upload PDFs",  # Explicit label
+    )
+
+    # Index Section
     gr.Markdown(
         '## <img draggable="false" role="img" class="emoji" alt="2️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/32-20e3.svg  "> Index the PDFs'
     )
-    convert_button = gr.Button("Convert and upload")
-    message = gr.Textbox("Files not yet uploaded")
+    convert_button = gr.Button("Convert and upload", elem_id="convert_btn")  # Unique ID
+    message = gr.Textbox(
+        "Files not yet uploaded",
+        elem_id="status_msg",  # Unique ID
+        label="Status",  # Explicit label
+    )
     embeds = gr.State(value=[])
     imgs = gr.State(value=[])
 
+    # Search Section
+    gr.Markdown(
+        '## <img draggable="false" role="img" class="emoji" alt="3️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/33-20e3.svg  "> Search'
+    )
+    query = gr.Textbox(
+        placeholder="Enter your query to match",
+        lines=10,
+        elem_id="query_input",  # Unique ID
+        label="Query",  # Explicit label
+    )
+    search_button = gr.Button("Search", elem_id="search_btn")  # Unique ID
+
+    # Results Section
+    gr.Markdown(
+        '## <img draggable="false" role="img" class="emoji" alt="4️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/34-20e3.svg  "> ColPali Retrieval'
+    )
+    message2 = gr.Textbox(
+        "Most relevant image is...",
+        elem_id="retrieval_msg",  # Unique ID
+        label="Retrieval Result",  # Explicit label
+    )
+    output_img = gr.Image(
+        elem_id="output_image", label="Retrieved Image"  # Unique ID  # Explicit label
+    )
+    output_text = gr.Textbox(
+        label="LLM Response", elem_id="llm_response"  # Explicit label  # Unique ID
+    )
+
+    # Event handlers remain unchanged
     convert_button.click(
         lambda file, ds: ColPaliApp.instance().index(file, ds),
         inputs=[file, embeds],
         outputs=[message, embeds, imgs],
     )
-
-    gr.Markdown(
-        '## <img draggable="false" role="img" class="emoji" alt="3️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/33-20e3.svg  "> Search'
-    )
-    query = gr.Textbox(placeholder="Enter your query to match", lines=10)
-    search_button = gr.Button("Search")
-
-    gr.Markdown(
-        '## <img draggable="false" role="img" class="emoji" alt="4️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/34-20e3.svg  "> ColPali Retrieval'
-    )
-    message2 = gr.Textbox("Most relevant image is...")
-    output_img = gr.Image()
-    output_text = gr.Textbox(label="LLM Response")
 
     search_button.click(
         lambda query, ds, images: ColPaliApp.instance().search_with_llm(
@@ -200,7 +255,8 @@ with gr.Blocks(css=css) as demo:
         outputs=[message2, output_img, output_text],
     )
 
+
 if __name__ == "__main__":
     load_dotenv()
     ColPaliApp.instance()
-    demo.queue(max_size=10).launch(debug=True, share=True)
+    demo.queue(max_size=10).launch(debug=True, share=False, pwa=True)

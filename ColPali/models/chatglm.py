@@ -97,7 +97,7 @@ class ChatGLM:
                 self.base_url,
                 headers=self.headers,
                 data=json.dumps(payload),
-                timeout=60
+                timeout=300
             )            
             output = self._get_valid_response_content(response)
             return output.strip().replace('<|begin_of_box|>', '').replace('<|end_of_box|>', '')
