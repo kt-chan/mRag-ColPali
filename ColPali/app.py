@@ -5,11 +5,13 @@ from dotenv import load_dotenv
 from pathlib import Path
 from pdf2image import convert_from_path
 from PIL import Image
+from IPython.display import Video
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers.utils.import_utils import is_flash_attn_2_available
 from colpali_engine.models import ColQwen2, ColQwen2Processor
 from models.chatglm import ChatGLM
+from utility.video_processor import VideoProcessor
 
 # Global Variable
 COLORS = ["#4285f4", "#db4437", "#f4b400", "#0f9d58", "#e48ef1"]
@@ -110,19 +112,67 @@ class ColPaliApp:
                 MODEL_LOADED = False
 
     @classmethod
+    def sample_video(cls, filename):
+        video_client = VideoProcessor()
+        video_frame_outputs = []
+        video_frame_outputs.extend(
+            video_client.sample_frames(video_path=filename, interval_seconds=5)
+        )
+        return video_frame_outputs
+
+    @classmethod
     def encode_image(cls, image: Image):
         with io.BytesIO() as buffer:
             image.save(buffer, format="JPEG")
             return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-    def index(self, file, ds):
+    def check_file_extension(sefl, file_path):
+        # Get the file extension
+        _, file_extension = os.path.splitext(file_path)
+        # Normalize the extension to uppercase for comparison
+        file_extension = file_extension.upper()
+        return str(file_extension[1:])
+
+    def index(self, files, ds):
+        pdf_files = []
+        video_files = []
+
+        for f in files:
+            file_ext = self.check_file_extension(f)
+            if file_ext.upper() == "PDF":
+                pdf_files.append(f)
+            if file_ext.upper() == "MP4":
+                video_files.append(f)
+
+        if len(pdf_files) > 0:
+            return self.index_images_from_pdf(pdf_files, ds)
+
+        if len(video_files) > 0:
+            return self.index_videos(video_files, ds)
+
+    def index_videos(self, files, ds):
+        if not self.models_loaded or self.model is None or self.processor is None:
+            print(f"Model not loaded properly, reloading ...")
+            self.reload()
+        videos = []
+        for file in files:
+            videos.extend(self.sample_video(str(file.name)))
+
+        output = self.index_images(videos, ds)
+        return output
+
+    def index_images_from_pdf(self, files, ds):
         if not self.models_loaded or self.model is None or self.processor is None:
             print(f"Model not loaded properly, reloading ...")
             self.reload()
 
         images = []
-        for f in file:
+        for f in files:
             images.extend(convert_from_path(f, poppler_path=self.popper_path))
+
+        return self.index_images(images, ds)
+
+    def index_images(self, images, ds):
 
         dataloader = DataLoader(
             images,
@@ -139,8 +189,9 @@ class ColPaliApp:
         return f"Uploaded and converted {len(images)} pages", ds, images
 
     def search(self, query: str, ds, images):
-        if not self.models_loaded:
-            return "Model not loaded properly", MOCK_IMAGE
+        if not self.models_loaded or self.model is None or self.processor is None:
+            print(f"Model not loaded properly, reloading ...")
+            self.reload()
 
         qs = []
         with torch.no_grad():
@@ -172,8 +223,9 @@ class ColPaliApp:
             return f"Error: {str(e)}"
 
     def search_with_llm(self, query, ds, images):
-        if not self.models_loaded:
-            return "Model not loaded properly", MOCK_IMAGE, "Model not loaded properly"
+        if not self.models_loaded or self.model is None or self.processor is None:
+            print(f"Model not loaded properly, reloading ...")
+            self.reload()
 
         search_message, best_image = self.search(query, ds, images)
         answer = self.get_answer(
@@ -192,7 +244,7 @@ with gr.Blocks(css=CSS_CONFIG) as demo:
         '## <img draggable="false" role="img" class="emoji" alt="1️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/31-20e3.svg  "> Upload PDFs'
     )
     file = gr.File(
-        file_types=[".pdf"],
+        file_types=[".pdf", ".mp4"],
         file_count="multiple",
         type="filepath",
         elem_id="pdf_upload",  # Unique ID
