@@ -154,10 +154,12 @@ class ColPaliApp:
         if not self.models_loaded or self.model is None or self.processor is None:
             print(f"Model not loaded properly, reloading ...")
             self.reload()
-        videos = []
+        video_files = []
         for file in files:
-            videos.extend(self.sample_video(str(file.name)))
-
+            video_files.extend(self.sample_video(str(file.name)))
+        videos = []
+        for video_file in video_files:
+            videos.append(Image.open(video_file))
         output = self.index_images(videos, ds)
         return output
 
@@ -237,6 +239,7 @@ class ColPaliApp:
 
 # Gradio Interface
 with gr.Blocks(css=CSS_CONFIG) as demo:
+
     gr.Markdown("# AnyVision: Efficient Visual Retrieval for Anything")
 
     # Upload Section
@@ -266,7 +269,7 @@ with gr.Blocks(css=CSS_CONFIG) as demo:
 
     # Search Section
     gr.Markdown(
-        '## <img draggable="false" role="img" class="emoji" alt="3️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/33-20e3.svg  "> Search'
+        '## <img draggable="false" role="img" class="emoji" alt="3️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/33-20e3.svg  "> Your Question?'
     )
     query = gr.Textbox(
         placeholder="Enter your query to match",
@@ -278,7 +281,7 @@ with gr.Blocks(css=CSS_CONFIG) as demo:
 
     # Results Section
     gr.Markdown(
-        '## <img draggable="false" role="img" class="emoji" alt="4️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/34-20e3.svg  "> ColPali Retrieval'
+        '## <img draggable="false" role="img" class="emoji" alt="4️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/34-20e3.svg  "> AnyVision Retrieval ...'
     )
     message2 = gr.Textbox(
         "Most relevant image is...",
