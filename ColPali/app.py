@@ -1,11 +1,9 @@
-import io, os, torch, base64, json, cv2
+import io, os, torch, base64
 import gradio as gr
 import threading
 from dotenv import load_dotenv
-from pathlib import Path
 from pdf2image import convert_from_path
 from PIL import Image
-from IPython.display import Video
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers.utils.import_utils import is_flash_attn_2_available
@@ -159,7 +157,10 @@ class ColPaliApp:
             video_files.extend(self.sample_video(str(file.name)))
         videos = []
         for video_file in video_files:
-            videos.append(Image.open(video_file))
+            with Image.open(video_file) as img:
+                # Load image data immediately to decouple from file handle
+                img.load()
+                videos.append(img)
         output = self.index_images(videos, ds)
         return output
 

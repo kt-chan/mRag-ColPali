@@ -1,4 +1,7 @@
 {
     "python.envFile": "${workspaceFolder}/.env",
-    "python.pythonPath": "${command:python.interpreterPath}"
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+    },
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv/Scripts/python.exe"
 }
