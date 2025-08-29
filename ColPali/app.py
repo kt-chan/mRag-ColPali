@@ -1,6 +1,11 @@
-import io, os, torch, base64
+import io
+import os
+import torch
+import base64
 import gradio as gr
 import threading
+from typing import List, Tuple, Optional, Dict, Any, Union
+from pathlib import Path
 from dotenv import load_dotenv
 from pdf2image import convert_from_path
 from PIL import Image
@@ -11,14 +16,14 @@ from colpali_engine.models import ColQwen2, ColQwen2Processor
 from models.chatglm import ChatGLM
 from utility.video_processor import VideoProcessor
 
-# Global Variable
-COLORS = ["#4285f4", "#db4437", "#f4b400", "#0f9d58", "#e48ef1"]
-MOCK_IMAGE = Image.new("RGB", (448, 448), (255, 255, 255))
-DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
-MODEL_NAME = "vidore/colqwen2-v1.0"
+# Global Constants
+COLORS: List[str] = ["#4285f4", "#db4437", "#f4b400", "#0f9d58", "#e48ef1"]
+MOCK_IMAGE: Image.Image = Image.new("RGB", (448, 448), (255, 255, 255))
+DEVICE: str = "cuda:0" if torch.cuda.is_available() else "cpu"
+MODEL_NAME: str = "vidore/colqwen2-v1.0"
 
 # CSS for emojis
-CSS_CONFIG = """
+CSS_CONFIG: str = """
 .emoji {
     width: 20px !important;
     height: 20px !important;
@@ -29,7 +34,6 @@ CSS_CONFIG = """
 """
 
 
-# Initialize model and processor once using gr.NO_RELOAD
 if gr.NO_RELOAD:
     print(f"Loading ColPali model on device: {DEVICE}")
     print(f"Loading ColPali model on path: {MODEL_NAME}")
@@ -54,35 +58,40 @@ if gr.NO_RELOAD:
 
 
 class ColPaliApp:
-    _instance = None
-    _lock = threading.Lock()
+    _instance: Optional["ColPaliApp"] = None
+    _lock: threading.Lock = threading.Lock()
+    _initialized: bool = False
 
-    def __new__(cls):
+    def __new__(cls) -> "ColPaliApp":
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super(ColPaliApp, cls).__new__(cls)
-                    cls.model = MODEL
-                    cls.processor = PROCESSOR
-                    cls.device = DEVICE
-                    cls.models_loaded = MODEL_LOADED
-                    cls.model_name = "vidore/colqwen2-v1.0"
-                    cls.hf_home = os.getenv(
+                    cls.model: Optional[ColQwen2] = MODEL
+                    cls.processor: Optional[ColQwen2Processor] = PROCESSOR
+                    cls.device: str = DEVICE
+                    cls.models_loaded: bool = MODEL_LOADED
+                    cls.model_name: str = "vidore/colqwen2-v1.0"
+                    cls.hf_home: str = os.getenv(
                         "HF_HOME", "C:/Program Files/poppler/Library/bin"
                     )
-                    cls.popper_path = os.getenv("POPPER_PATH", "D:/models/huggingface")
-                    cls.vlm_api_key = os.getenv("VLM_API_KEY", None)
+                    cls.popper_path: str = os.getenv(
+                        "POPPER_PATH", "D:/models/huggingface"
+                    )
+                    cls.vlm_api_key: Optional[str] = os.getenv("VLM_API_KEY", None)
+                    cls.video_processor: VideoProcessor = VideoProcessor()
         return cls._instance
 
-    @classmethod
-    def instance(cls):
-        return cls()
+    def __init__(self) -> None:
+        if not self._initialized:
+            with self._lock:
+                if not self._initialized:
+                    self._initialized = True
 
     @classmethod
-    def reload(cls):
-        # No-op since models are loaded in gr.NO_RELOAD block
-        global MODEL_LOADED, MODEL, PROCESSOR, DEVICE
-        if MODEL_LOADED == False or MODEL is None or PROCESSOR is None:
+    def reload(cls) -> None:
+        global MODEL_LOADED, MODEL, PROCESSOR
+        if not MODEL_LOADED or MODEL is None or PROCESSOR is None:
             print(f"Loading ColPali model on device: {DEVICE}")
             print(f"Loading ColPali model on path: {MODEL_NAME}")
 
@@ -110,109 +119,143 @@ class ColPaliApp:
                 MODEL_LOADED = False
 
     @classmethod
-    def sample_video(cls, filename):
-        video_client = VideoProcessor()
-        video_frame_outputs = []
-        video_frame_outputs.extend(
-            video_client.sample_frames(video_path=filename, interval_seconds=5)
-        )
-        return video_frame_outputs
+    def sample_video(cls, filename: str) -> List[Image.Image]:
+        try:
+            return cls.video_processor.sample_frames(
+                video_path=filename, interval_seconds=5
+            )
+        except Exception as e:
+            print(f"Error sampling video {filename}: {str(e)}")
+            return []
 
     @classmethod
-    def encode_image(cls, image: Image):
-        with io.BytesIO() as buffer:
-            image.save(buffer, format="JPEG")
-            return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    def encode_image(cls, image: Image.Image) -> str:
+        try:
+            with io.BytesIO() as buffer:
+                image.save(buffer, format="JPEG")
+                return base64.b64encode(buffer.getvalue()).decode("utf-8")
+        except Exception as e:
+            print(f"Error encoding image: {str(e)}")
+            return ""
 
-    def check_file_extension(sefl, file_path):
-        # Get the file extension
-        _, file_extension = os.path.splitext(file_path)
-        # Normalize the extension to uppercase for comparison
-        file_extension = file_extension.upper()
-        return str(file_extension[1:])
+    def check_file_extension(self, file_path: str) -> str:
+        try:
+            return Path(file_path).suffix[1:].upper()
+        except Exception as e:
+            print(f"Error checking file extension {file_path}: {str(e)}")
+            return ""
 
-    def index(self, files, ds):
-        pdf_files = []
-        video_files = []
+    def index(
+        self, files: List[str], ds: List[Any]
+    ) -> Tuple[str, List[Any], List[Image.Image]]:
+        try:
+            pdf_files: List[str] = []
+            video_files: List[str] = []
 
-        for f in files:
-            file_ext = self.check_file_extension(f)
-            if file_ext.upper() == "PDF":
-                pdf_files.append(f)
-            if file_ext.upper() == "MP4":
-                video_files.append(f)
+            for f in files:
+                file_ext = self.check_file_extension(f)
+                if file_ext == "PDF":
+                    pdf_files.append(f)
+                elif file_ext == "MP4":
+                    video_files.append(f)
 
-        if len(pdf_files) > 0:
-            return self.index_images_from_pdf(pdf_files, ds)
+            if pdf_files:
+                return self.index_images_from_pdf(pdf_files, ds)
+            elif video_files:
+                return self.index_videos(video_files, ds)
+            else:
+                return "No valid files found", ds, []
+        except Exception as e:
+            print(f"Error in indexing: {str(e)}")
+            return f"Error during indexing: {str(e)}", ds, []
 
-        if len(video_files) > 0:
-            return self.index_videos(video_files, ds)
-
-    def index_videos(self, files, ds):
+    def index_videos(
+        self, files: List[str], ds: List[Any]
+    ) -> Tuple[str, List[Any], List[Image.Image]]:
         if not self.models_loaded or self.model is None or self.processor is None:
             print(f"Model not loaded properly, reloading ...")
             self.reload()
         video_files = []
         for file in files:
-            video_files.extend(self.sample_video(str(file.name)))
+            video_files.extend(self.sample_video(str(Path(file).resolve())))
         videos = []
         for video_file in video_files:
             with Image.open(video_file) as img:
                 # Load image data immediately to decouple from file handle
                 img.load()
                 videos.append(img)
-        output = self.index_images(videos, ds)
-        return output
+        return self.index_images(videos, ds)
 
-    def index_images_from_pdf(self, files, ds):
+    def index_images_from_pdf(
+        self, files: List[str], ds: List[Any]
+    ) -> Tuple[str, List[Any], List[Image.Image]]:
         if not self.models_loaded or self.model is None or self.processor is None:
-            print(f"Model not loaded properly, reloading ...")
+            print("Model not loaded properly, reloading ...")
             self.reload()
 
-        images = []
+        images: List[Image.Image] = []
         for f in files:
-            images.extend(convert_from_path(f, poppler_path=self.popper_path))
+            try:
+                images.extend(convert_from_path(f, poppler_path=self.popper_path))
+            except Exception as e:
+                print(f"Error converting PDF {f}: {str(e)}")
+                continue
 
         return self.index_images(images, ds)
 
-    def index_images(self, images, ds):
+    def index_images(
+        self, images: List[Image.Image], ds: List[Any]
+    ) -> Tuple[str, List[Any], List[Image.Image]]:
+        if not images:
+            return "No images to process", ds, []
 
-        dataloader = DataLoader(
-            images,
-            batch_size=4,
-            shuffle=False,
-            collate_fn=lambda x: self.processor.process_images(x),
-        )
+        try:
+            dataloader = DataLoader(
+                images,
+                batch_size=4,
+                shuffle=False,
+                collate_fn=lambda x: self.processor.process_images(x),
+            )
 
-        for batch_doc in tqdm(dataloader):
-            with torch.no_grad():
-                batch_doc = {k: v.to(self.device) for k, v in batch_doc.items()}
-                embeddings_doc = self.model(**batch_doc)
-            ds.extend(list(torch.unbind(embeddings_doc.to("cpu"))))
-        return f"Uploaded and converted {len(images)} pages", ds, images
+            for batch_doc in tqdm(dataloader):
+                with torch.no_grad():
+                    batch_doc = {k: v.to(self.device) for k, v in batch_doc.items()}
+                    embeddings_doc = self.model(**batch_doc)
+                ds.extend(list(torch.unbind(embeddings_doc.to("cpu"))))
 
-    def search(self, query: str, ds, images):
+            return f"Uploaded and converted {len(images)} pages", ds, images
+        except Exception as e:
+            print(f"Error during image indexing: {str(e)}")
+            return f"Error during image processing: {str(e)}", ds, images
+
+    def search(
+        self, query: str, ds: List[Any], images: List[Image.Image]
+    ) -> Tuple[str, Image.Image]:
         if not self.models_loaded or self.model is None or self.processor is None:
-            print(f"Model not loaded properly, reloading ...")
+            print("Model not loaded properly, reloading ...")
             self.reload()
 
-        qs = []
-        with torch.no_grad():
-            batch_query = self.processor.process_queries([query])
-            batch_query = {k: v.to(self.device) for k, v in batch_query.items()}
-            embeddings_query = self.model(**batch_query)
-            qs.extend(list(torch.unbind(embeddings_query.to("cpu"))))
+        try:
+            qs: List[Any] = []
+            with torch.no_grad():
+                batch_query = self.processor.process_queries([query])
+                batch_query = {k: v.to(self.device) for k, v in batch_query.items()}
+                embeddings_query = self.model(**batch_query)
+                qs.extend(list(torch.unbind(embeddings_query.to("cpu"))))
 
-        scores = self.processor.score_multi_vector(qs, ds)
-        best_page = int(scores.argmax(axis=1).item())
-        return f"The most relevant page is {str(best_page)}", images[best_page]
+            scores = self.processor.score_multi_vector(qs, ds)
+            best_page = int(scores.argmax(axis=1).item())
+            return f"The most relevant page is {str(best_page)}", images[best_page]
+        except Exception as e:
+            print(f"Error during search: {str(e)}")
+            return f"Search error: {str(e)}", MOCK_IMAGE
 
-    def get_answer(self, prompt: str, image: Image):
+    def get_answer(self, prompt: str, image: Image.Image) -> str:
         if not self.vlm_api_key:
             return "VLM API key not configured"
 
-        vlmClient = ChatGLM(self.vlm_api_key)
         try:
+            vlmClient = ChatGLM(self.vlm_api_key)
             base64_image = self.encode_image(image)
             print("Image decoded, and waiting API Response:")
             response = vlmClient.chat_completion(
@@ -225,11 +268,9 @@ class ColPaliApp:
             print(f"VLM Calling Error: {str(e)}")
             return f"Error: {str(e)}"
 
-    def search_with_llm(self, query, ds, images):
-        if not self.models_loaded or self.model is None or self.processor is None:
-            print(f"Model not loaded properly, reloading ...")
-            self.reload()
-
+    def search_with_llm(
+        self, query: str, ds: List[Any], images: List[Image.Image]
+    ) -> Tuple[str, Image.Image, str]:
         search_message, best_image = self.search(query, ds, images)
         answer = self.get_answer(
             f"What is shown in this image, analyze and provide some interpretation? And provide a concise answer to this question: {query}",
@@ -238,75 +279,70 @@ class ColPaliApp:
         return search_message, best_image, answer
 
 
+app = ColPaliApp()
+
 # Gradio Interface
 with gr.Blocks(css=CSS_CONFIG) as demo:
-
     gr.Markdown("# AnyVision: Efficient Visual Retrieval for Anything")
 
     # Upload Section
     gr.Markdown(
-        '## <img draggable="false" role="img" class="emoji" alt="1️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/31-20e3.svg  "> Upload PDFs'
+        '## <img draggable="false" role="img" class="emoji" alt="1️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/31-20e3.svg"> Upload PDFs'
     )
     file = gr.File(
         file_types=[".pdf", ".mp4"],
         file_count="multiple",
         type="filepath",
-        elem_id="pdf_upload",  # Unique ID
-        label="Upload PDFs",  # Explicit label
+        elem_id="pdf_upload",
+        label="Upload PDFs",
     )
 
     # Index Section
     gr.Markdown(
-        '## <img draggable="false" role="img" class="emoji" alt="2️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/32-20e3.svg  "> Index the PDFs'
+        '## <img draggable="false" role="img" class="emoji" alt="2️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/32-20e3.svg"> Index the PDFs'
     )
-    convert_button = gr.Button("Convert and upload", elem_id="convert_btn")  # Unique ID
+    convert_button = gr.Button("Convert and upload", elem_id="convert_btn")
     message = gr.Textbox(
         "Files not yet uploaded",
-        elem_id="status_msg",  # Unique ID
-        label="Status",  # Explicit label
+        elem_id="status_msg",
+        label="Status",
     )
     embeds = gr.State(value=[])
     imgs = gr.State(value=[])
 
     # Search Section
     gr.Markdown(
-        '## <img draggable="false" role="img" class="emoji" alt="3️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/33-20e3.svg  "> Your Question?'
+        '## <img draggable="false" role="img" class="emoji" alt="3️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/33-20e3.svg"> Your Question?'
     )
     query = gr.Textbox(
         placeholder="Enter your query to match",
         lines=10,
-        elem_id="query_input",  # Unique ID
-        label="Query",  # Explicit label
+        elem_id="query_input",
+        label="Query",
     )
-    search_button = gr.Button("Search", elem_id="search_btn")  # Unique ID
+    search_button = gr.Button("Search", elem_id="search_btn")
 
     # Results Section
     gr.Markdown(
-        '## <img draggable="false" role="img" class="emoji" alt="4️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/34-20e3.svg  "> AnyVision Retrieval ...'
+        '## <img draggable="false" role="img" class="emoji" alt="4️⃣" src="https://s.w.org/images/core/emoji/16.0.1/svg/34-20e3.svg"> AnyVision Retrieval ...'
     )
     message2 = gr.Textbox(
         "Most relevant image is...",
-        elem_id="retrieval_msg",  # Unique ID
-        label="Retrieval Result",  # Explicit label
+        elem_id="retrieval_msg",
+        label="Retrieval Result",
     )
-    output_img = gr.Image(
-        elem_id="output_image", label="Retrieved Image"  # Unique ID  # Explicit label
-    )
-    output_text = gr.Textbox(
-        label="LLM Response", elem_id="llm_response"  # Explicit label  # Unique ID
-    )
+    output_img = gr.Image(elem_id="output_image", label="Retrieved Image")
+    output_text = gr.Textbox(label="LLM Response", elem_id="llm_response")
 
-    # Event handlers remain unchanged
+    # Event handlers
     convert_button.click(
-        lambda file, ds: ColPaliApp.instance().index(file, ds),
+        app.index,
         inputs=[file, embeds],
         outputs=[message, embeds, imgs],
     )
 
     search_button.click(
-        lambda query, ds, images: ColPaliApp.instance().search_with_llm(
-            query, ds, images
-        ),
+        app.search_with_llm,
         inputs=[query, embeds, imgs],
         outputs=[message2, output_img, output_text],
     )
@@ -314,5 +350,4 @@ with gr.Blocks(css=CSS_CONFIG) as demo:
 
 if __name__ == "__main__":
     load_dotenv()
-    ColPaliApp.instance()
     demo.queue(max_size=10).launch(debug=True, share=False, pwa=True)

@@ -22,7 +22,7 @@ class VideoProcessor:
         video_path,
         interval_seconds=5,
         output_folder=None,
-    ):
+    ) -> list[str]:
         """
         Sample frames from a video at specified time intervals.
 
@@ -93,7 +93,7 @@ class VideoProcessor:
             if os.path.exists(output_directory):
                 shutil.rmtree(str(output_directory))
             os.rename(str(temp_directory), str(output_directory))
-            
+
             max_attempts = 5
             attempt = 0
             while attempt < max_attempts:
